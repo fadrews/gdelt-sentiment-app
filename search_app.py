@@ -298,31 +298,77 @@ def plot_sentiment_share(df, query, freq_label):
     return fig
 
 def plot_dual_axis(df, query, freq_label):
+    """
+    df expected to have period_str, articles, avg_tone
+    Draws article bars (ax1) and avg_tone line (ax2).
+    For monthly freq, also draws horizontal lines at mean +/- 2*std of avg_tone.
+    """
     total_articles = int(df["articles"].sum()) if "articles" in df.columns else None
     x_dates = pd.to_datetime(df["period_str"], errors="coerce")
+
     if freq_label.lower().startswith("monthly"):
         fmt = "%b %Y"
     else:
         fmt = "%d %b %Y"
+
     fig, ax1 = plt.subplots(figsize=(10,5))
+    # bar width tuned for datetime x
     width = 20 if freq_label.lower().startswith("monthly") else 6
     ax1.bar(x_dates, df["articles"], label="Article Volume", alpha=0.6, width=width)
     ax1.set_ylabel("Articles")
     ax1.xaxis.set_major_formatter(mdates.DateFormatter(fmt))
     plt.setp(ax1.get_xticklabels(), rotation=45, ha="right")
+
     ax2 = ax1.twinx()
     ax2.axhline(0, color="gray", linestyle="--", linewidth=0.8)
     ax2.set_ylabel("Average Tone")
-    ax2.plot(x_dates, df["avg_tone"], linewidth=2)
+
+    # plot avg_tone line
+    ax2.plot(x_dates, df["avg_tone"], linewidth=2, label="Avg Tone")
+
+    # plot point markers colored by sign
     for i, (xi, yi) in enumerate(zip(x_dates, df["avg_tone"])):
         color = "green" if pd.notna(yi) and yi >= 0 else "red"
         ax2.plot(xi, yi, marker="o", color=color)
+
+    # --- compute mean and std for avg_tone and draw +/-2 sigma lines for monthly only ---
+    if freq_label.lower().startswith("monthly"):
+        tone_vals = pd.to_numeric(df["avg_tone"], errors="coerce").dropna()
+        if len(tone_vals) > 0:
+            mean_tone = tone_vals.mean()
+            std_tone = tone_vals.std(ddof=0)  # population std; change ddof=1 for sample std
+            upper = mean_tone + 2 * std_tone
+            lower = mean_tone - 2 * std_tone
+
+            # draw lines on ax2
+            ax2.axhline(upper, color="orange", linestyle="--", linewidth=1.5, alpha=0.8, label="+2σ")
+            ax2.axhline(lower, color="orange", linestyle="--", linewidth=1.5, alpha=0.8, label="-2σ")
+
+            # annotate the numeric values in the top-right corner of the left axis
+            text_x = 0.99
+            text_y = 0.90
+            ax2.text(
+                text_x, text_y,
+                f"mean={mean_tone:.3f}\n+2σ={upper:.3f}\n-2σ={lower:.3f}",
+                ha="right", va="top", transform=ax2.transAxes,
+                fontsize=9, bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.6)
+            )
+        else:
+            # no data to compute stats — silently skip
+            mean_tone = std_tone = None
+
+    # annotate total articles if available
     if total_articles is not None:
         ax1.text(0.99, 0.95, f"Total articles: {total_articles:,}", ha="right", va="top", transform=ax1.transAxes)
+
+    # build legend: include avg tone threshold lines if present
     lines1, labels1 = ax1.get_legend_handles_labels()
-    custom_line = plt.Line2D([], [], color="green", marker="o", label="Avg Tone ≥ 0")
-    custom_line2 = plt.Line2D([], [], color="red", marker="o", label="Avg Tone < 0")
-    ax1.legend(lines1 + [custom_line, custom_line2], labels1 + ["Avg Tone ≥ 0", "Avg Tone < 0"], loc="upper left")
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    # avoid duplicate legend labels for +/-2σ (they have same label twice)
+    combined_lines = lines1 + lines2
+    combined_labels = labels1 + labels2
+    ax1.legend(combined_lines, combined_labels, loc="upper left")
+
     fig.suptitle(f"{freq_label} Volume and Sentiment")
     fig.tight_layout()
     return fig
