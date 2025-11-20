@@ -5,6 +5,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from datetime import datetime, timedelta
+from io import BytesIO
 import io
 
 # -------------------------
@@ -191,16 +192,9 @@ def aggregate_sentiment_share(df, freq="monthly"):
 # Fill missing periods with interpolation for avg_tone
 # -------------------------
 def fill_missing_periods(agg_df, start_dt, end_dt, freq="monthly"):
-    """
-    Ensure agg_df has a continuous sequence of period_str rows between start_dt and end_dt.
-    - freq: "monthly" or "weekly"
-    Missing numeric counts are set to 0. avg_tone is interpolated (time-based).
-    """
-    # required columns we'll ensure exist
     required_cols = ["period_str", "positive", "negative", "articles", "avg_tone",
                      "total_bins", "positive_share_%", "negative_share_%"]
 
-    # If agg_df empty, build full index and return zeros + NaN avg_tone (then interpolated -> NaN)
     if agg_df is None or agg_df.empty:
         if freq == "monthly":
             all_periods = pd.date_range(start=start_dt.replace(day=1), end=end_dt, freq="MS")
@@ -223,7 +217,6 @@ def fill_missing_periods(agg_df, start_dt, end_dt, freq="monthly"):
         out["negative_share_%"] = 0
         return out
 
-    # copy and ensure columns exist
     df = agg_df.copy()
     for c in ["positive", "negative", "articles", "avg_tone"]:
         if c not in df.columns:
@@ -237,50 +230,42 @@ def fill_missing_periods(agg_df, start_dt, end_dt, freq="monthly"):
         start_monday = (start_dt - pd.to_timedelta(start_dt.weekday(), unit="d")).date()
         full_index = pd.date_range(start=pd.to_datetime(start_monday), end=end_dt, freq="W-MON")
 
-    # reindex by datetime index to create missing periods
     df = df.set_index("period_dt")
     df.index = pd.to_datetime(df.index)
     reindexed = df.reindex(full_index)
 
-    # fill numeric counts with 0 for missing periods
     for col in ["positive", "negative", "articles"]:
         if col in reindexed.columns:
             reindexed[col] = reindexed[col].fillna(0)
 
-    # make sure total_bins exists then fill
     reindexed["total_bins"] = reindexed.get("total_bins", reindexed.get("positive", 0) + reindexed.get("negative", 0))
     reindexed["total_bins"] = reindexed["total_bins"].fillna(reindexed.get("positive", 0) + reindexed.get("negative", 0))
 
-    # For avg_tone, convert to float and interpolate in time (uses datetime index)
     if "avg_tone" not in reindexed.columns:
         reindexed["avg_tone"] = float("nan")
-    # ensure numeric dtype and preserve existing NaNs
     reindexed["avg_tone"] = pd.to_numeric(reindexed["avg_tone"], errors="coerce")
 
-    # interpolate using time method over the datetime index
     try:
         reindexed["avg_tone"] = reindexed["avg_tone"].interpolate(method="time", limit_direction="both")
     except Exception:
-        # fallback to linear if time interpolation fails
         reindexed["avg_tone"] = reindexed["avg_tone"].interpolate(method="linear", limit_direction="both")
 
-    # recompute shares from positive/negative
     reindexed["total_bins"] = reindexed["positive"].astype(float) + reindexed["negative"].astype(float)
     reindexed["positive_share_%"] = reindexed.apply(
-        lambda r: (r["positive"] / r["total_bins"]) * 100 if r["total_bins"] > 0 else 0, axis=1
+        lambda r: (r["positive"] / r["total_bins"]) * 100 if r["total_bins"] > 0 else 0,
+        axis=1
     )
     reindexed["negative_share_%"] = reindexed.apply(
-        lambda r: (r["negative"] / r["total_bins"]) * 100 if r["total_bins"] > 0 else 0, axis=1
+        lambda r: (r["negative"] / r["total_bins"]) * 100 if r["total_bins"] > 0 else 0,
+        axis=1
     )
 
-    # restore period_str
     out = reindexed.reset_index().rename(columns={"index": "period_dt"})
     if freq == "monthly":
         out["period_str"] = out["period_dt"].dt.strftime("%Y-%m")
     else:
         out["period_str"] = out["period_dt"].dt.strftime("%Y-%m-%d")
 
-    # choose and order columns
     cols_order = ["period_str", "positive", "negative", "articles", "avg_tone", "total_bins", "positive_share_%", "negative_share_%"]
     cols_present = [c for c in cols_order if c in out.columns]
     return out[cols_present].reset_index(drop=True)
@@ -320,7 +305,6 @@ def plot_dual_axis(df, query, freq_label):
     else:
         fmt = "%d %b %Y"
     fig, ax1 = plt.subplots(figsize=(10,5))
-    # bar width tuned for datetime x
     width = 20 if freq_label.lower().startswith("monthly") else 6
     ax1.bar(x_dates, df["articles"], label="Article Volume", alpha=0.6, width=width)
     ax1.set_ylabel("Articles")
@@ -344,40 +328,165 @@ def plot_dual_axis(df, query, freq_label):
     return fig
 
 # -------------------------
-# Streamlit UI (sidebar-first selection)
+# Streamlit UI (sidebar-first selection, with separators and styled button)
 # -------------------------
 st.set_page_config(page_title="GDELT Sentiment Share Explorer", layout="wide")
 st.title("GDELT Sentiment Share Explorer (TimelineTone + TimelineVol)")
+st.markdown(
+    """
+    <style>
+    /* Reduce space between widgets */
+    div[data-testid="stVerticalBlock"] > div {
+        padding-top: 0rem;
+        padding-bottom: 0rem;
+    }
+    /* Reduce section title spacing */
+    h2, h3 {
+        margin-bottom: 0.2rem;
+        margin-top: 0.2rem;
+    }
+    /* Compact checkboxes, radios, inputs */
+    div[data-testid="stCheckbox"] {
+        margin-bottom: 0.1rem;
+    }
+    div[data-testid="stRadio"] label {
+        line-height: 1.1;
+    }
+    /* Compact text inputs and date inputs */
+    div[data-testid="stTextInput"], div[data-testid="stDateInput"] {
+        margin-bottom: 0.3rem;
+    }
+    /* Reduce sidebar padding */
+    section[data-testid="stSidebar"] > div {
+        padding-top: 0.3rem;
+        padding-bottom: 0.3rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
 with st.sidebar:
-    st.header("Query & Timeframe")
+    st.title("⚙️ App Controls")
 
-    raw_query = st.text_input("GDELT query (use OR for multiple terms)", value="AI OR ChatGPT")
+    # ---- Query Section ----
+    st.subheader("1️⃣ Search Query")
+    raw_query = st.text_input(
+        "GDELT query (use OR for multiple terms)",
+        value="AI OR ChatGPT",
+        help="Use parentheses around OR terms automatically handled by the app."
+    )
     query = normalize_query(raw_query)
     if raw_query and raw_query.strip() != query:
-        st.info(f"Normalized query to: `{query}` (wrapped OR terms in parentheses).")
+        st.info(f"Normalized query to `{query}` for GDELT API compatibility.")
 
+    st.markdown("---")
+
+    # ---- Date Selection ----
+    st.markdown("### 2️⃣ Date Range")
     today = datetime.now().date()
     default_end = today
     default_start = today - timedelta(days=364)
-    start_date = st.date_input("Start date", value=default_start)
-    end_date = st.date_input("End date", value=default_end)
 
-    freq = st.radio("Aggregation frequency", ("monthly", "weekly"))
+    # show start and end side-by-side
+    col1, col2 = st.columns(2)
+    with col1:
+        start_date = st.date_input("Start", value=default_start)
+    with col2:
+        end_date = st.date_input("End", value=default_end)
 
-    st.markdown("### Output selection (choose before Fetch)")
-    show_share = st.checkbox("Show Sentiment Share chart", value=True)
-    show_dual = st.checkbox("Show Volume & Avg Tone chart", value=True)
-    show_table = st.checkbox("Show aggregated table", value=True)
-    download_csv = st.checkbox("Show CSV download link", value=True)
-    raw_download = st.checkbox("Offer raw timeline CSV download", value=False)
+    st.markdown("---")
+
+    # ---- Aggregation Frequency ----
+    st.subheader("3️⃣ Aggregation")
+    freq = st.radio(
+        "Select aggregation frequency:",
+        ("monthly", "weekly"),
+        help="Choose how data are grouped and visualized."
+    )
+
+    st.markdown("---")
+
+    # ---- Output Selection ----
+    st.subheader("4️⃣ Output Selection")
+    show_share = st.checkbox("📊 Sentiment Share chart", value=True)
+    show_dual = st.checkbox("📈 Volume & Avg Tone chart", value=True)
+    show_table = st.checkbox("📋 Aggregated data table", value=True)
+    download_csv = st.checkbox("💾 Aggregated CSV download", value=True)
+    raw_download = st.checkbox("🗃 Raw timeline CSV download", value=False)
+    allow_fig_download = st.checkbox("🖼 Allow figure PNG downloads", value=True)
+
+    st.markdown("---")
+
+    # ---- Fetch Data Button ----
+    st.subheader("5️⃣ Fetch & Analyze")
 
     any_output_selected = any([show_share, show_dual, show_table, download_csv, raw_download])
     if not any_output_selected:
-        st.warning("Select at least one output (chart, table or CSV) before fetching.")
-        fetch_button = st.button("Fetch data and plot", disabled=True)
+        st.warning("Select at least one output option above before fetching.")
+        # disabled button when nothing selected
+        fetch_button = st.button("🚫 Fetch Data", disabled=True, use_container_width=True)
     else:
-        fetch_button = st.button("Fetch data and plot")
+        # add a bit of CSS to make the button more visually prominent
+        st.markdown(
+            """
+            <style>
+            div.stButton > button:first-child {
+                background-color: #0E79B2;
+                color: white;
+                font-weight: 600;
+                border-radius: 8px;
+                height: 3em;
+            }
+            div.stButton > button:hover {
+                filter: brightness(1.05);
+            }
+            </style>
+            """,
+            unsafe_allow_html=True
+        )
+        st.markdown(
+            "<div style='text-align:center;'>"
+            "<span style='font-size:1.02em;'>Click below to fetch and analyze data</span>"
+            "</div>",
+            unsafe_allow_html=True
+        )
+        fetch_button = st.button("🚀 Fetch Data & Plot", use_container_width=True)
+
+st.markdown(
+    """
+    <style>
+    /* Reduce space between widgets */
+    div[data-testid="stVerticalBlock"] > div {
+        padding-top: 0rem;
+        padding-bottom: 0rem;
+    }
+    /* Reduce section title spacing */
+    h2, h3 {
+        margin-bottom: 0.2rem;
+        margin-top: 0.2rem;
+    }
+    /* Compact checkboxes, radios, inputs */
+    div[data-testid="stCheckbox"] {
+        margin-bottom: 0.1rem;
+    }
+    div[data-testid="stRadio"] label {
+        line-height: 1.1;
+    }
+    /* Compact text inputs and date inputs */
+    div[data-testid="stTextInput"], div[data-testid="stDateInput"] {
+        margin-bottom: 0.3rem;
+    }
+    /* Reduce sidebar padding */
+    section[data-testid="stSidebar"] > div {
+        padding-top: 0.3rem;
+        padding-bottom: 0.3rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 
 # --- Main: perform fetch only when clicked ---
 if fetch_button:
@@ -398,7 +507,7 @@ if fetch_button:
         else:
             st.success(f"Fetched {len(merged)} timeline rows.")
             agg = aggregate_sentiment_share(merged, freq=freq)
-            # fill missing periods and interpolate avg_tone across time
+            # ensure continuous periods and interpolate avg_tone
             agg = fill_missing_periods(agg, start_dt, end_dt, freq=freq)
 
             if agg.empty:
@@ -406,16 +515,36 @@ if fetch_button:
             else:
                 freq_label = "Monthly" if freq == "monthly" else "Weekly (week-start Mondays)"
 
-                # display outputs according to sidebar selection (vertical)
+                # Display selected outputs (vertical layout)
                 if show_share:
                     st.subheader(f"{freq_label} Sentiment Share")
                     fig1 = plot_sentiment_share(agg, query, freq_label)
                     st.pyplot(fig1)
+                    if allow_fig_download:
+                        buf1 = BytesIO()
+                        fig1.savefig(buf1, format="png", dpi=300, bbox_inches="tight")
+                        buf1.seek(0)
+                        st.download_button(
+                            label="📥 Download Sentiment Share chart (PNG)",
+                            data=buf1,
+                            file_name="sentiment_share.png",
+                            mime="image/png"
+                        )
 
                 if show_dual:
                     st.subheader("Volume & Avg Tone")
                     fig2 = plot_dual_axis(agg, query, freq_label)
                     st.pyplot(fig2)
+                    if allow_fig_download:
+                        buf2 = BytesIO()
+                        fig2.savefig(buf2, format="png", dpi=300, bbox_inches="tight")
+                        buf2.seek(0)
+                        st.download_button(
+                            label="📥 Download Volume & Avg Tone chart (PNG)",
+                            data=buf2,
+                            file_name="volume_avg_tone.png",
+                            mime="image/png"
+                        )
 
                 if show_table:
                     st.subheader("Aggregated table")
