@@ -409,12 +409,12 @@ with st.sidebar:
 
     # ---- Output Selection ----
     st.subheader("4️⃣ Output Selection")
-    show_share = st.checkbox("📊 Sentiment Share chart", value=True)
-    show_dual = st.checkbox("📈 Volume & Avg Tone chart", value=True)
-    show_table = st.checkbox("📋 Aggregated data table", value=True)
-    download_csv = st.checkbox("💾 Aggregated CSV download", value=True)
-    raw_download = st.checkbox("🗃 Raw timeline CSV download", value=False)
-    allow_fig_download = st.checkbox("🖼 Allow figure PNG downloads", value=True)
+    show_share = st.checkbox("Sentiment Share chart", value=True)
+    show_dual = st.checkbox("Volume & Avg Tone chart", value=True)
+    show_table = st.checkbox("Aggregated data table", value=True)
+    download_csv = st.checkbox("Aggregated CSV download", value=True)
+    raw_download = st.checkbox("Raw timeline CSV download", value=False)
+    allow_fig_download = st.checkbox("Allow figure PNG downloads", value=True)
 
     st.markdown("---")
 
@@ -451,7 +451,7 @@ with st.sidebar:
             "</div>",
             unsafe_allow_html=True
         )
-        fetch_button = st.button("🚀 Fetch Data & Plot", use_container_width=True)
+        fetch_button = st.button(" Fetch Data & Plot", use_container_width=True)
 
 st.markdown(
     """
