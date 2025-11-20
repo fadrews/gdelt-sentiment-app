@@ -331,7 +331,7 @@ def plot_dual_axis(df, query, freq_label):
 # Streamlit UI (sidebar-first selection, with separators and styled button)
 # -------------------------
 st.set_page_config(page_title="GDELT Sentiment Share Explorer", layout="wide")
-st.title("GDELT Sentiment Share Explorer (TimelineTone + TimelineVol)")
+st.title("GDELT Sentiment Share Search")
 st.markdown(
     """
     <style>
