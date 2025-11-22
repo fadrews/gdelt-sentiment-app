@@ -16,7 +16,7 @@ import matplotlib.dates as mdates
 from datetime import datetime, timedelta
 from io import BytesIO
 import io
-
+import gdeltdoc
 # Try to import gdeltdoc (optional). If unavailable, we will fall back.
 try:
     from gdeltdoc import GdeltDoc, Filters
